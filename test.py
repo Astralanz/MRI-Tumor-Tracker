@@ -9,14 +9,13 @@ from PyQt5.QtGui import QImage, QPixmap, QFont
 class DeteksiTumorApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Pendeteksi Tumor Otak - Desktop UI")
+        self.setWindowTitle("MRI Tumor Tracker - Desktop UI")
         self.setGeometry(50, 50, 1300, 750) 
         self.setStyleSheet("background-color: #f0f4f8;") 
         
         self.img_bgr = None
         self.final_result_img = None
         
-        # Variabel untuk menyimpan status mode saat ini
         self.mode = "Meningioma" 
         self.menu_buttons = {} 
         
@@ -83,14 +82,15 @@ class DeteksiTumorApp(QMainWindow):
         konten_kanan.addLayout(baris_atas)
         konten_kanan.addSpacing(40) 
 
+        # AREA BAWAH: Dibagi 3 bagian (Kiri Slider, Tengah Gambar, Kanan Info+Tombol)
         baris_bawah = QHBoxLayout()
         baris_bawah.setSpacing(30)
 
+        # 1. BAGIAN KIRI: SLIDER
         panel_slider = QVBoxLayout()
         panel_slider.setSpacing(15)
         panel_slider.setAlignment(Qt.AlignVCenter)
         
-        # PERHATIKAN: index 0 adalah layout, index 1 adalah slider (lbl_val_th dll)
         self.slider_thresh, self.lbl_val_th = self.buat_slider_ui("Batas Kecerahan : ", 0, 255, 0)
         self.slider_circ, self.lbl_val_circ = self.buat_slider_ui("Toleransi Lingkaran : ", 1, 90, 20)
         self.slider_area, self.lbl_val_area = self.buat_slider_ui("Size Minimum Tumor : ", 50, 5000, 150)
@@ -99,12 +99,21 @@ class DeteksiTumorApp(QMainWindow):
         panel_slider.addLayout(self.slider_circ)
         panel_slider.addLayout(self.slider_area)
         
+        # 2. BAGIAN TENGAH: GAMBAR FINAL
         self.panel_final, self.lbl_final = self.buat_panel_gambar("FINAL", 300)
         
-        panel_tombol = QVBoxLayout()
-        panel_tombol.setAlignment(Qt.AlignVCenter)
-        panel_tombol.setSpacing(20)
+        # 3. BAGIAN KANAN: DATA KLINIS & TOMBOL
+        panel_kanan = QVBoxLayout()
+        panel_kanan.setAlignment(Qt.AlignVCenter)
+        panel_kanan.setSpacing(15)
 
+        # Teks Box Info Klinis
+        self.lbl_info_klinis = QLabel("Data Klinis:\nMenunggu gambar...")
+        self.lbl_info_klinis.setStyleSheet("background-color: white; border: 2px solid #ccc; border-radius: 15px; padding: 15px; font-size: 13px; color: #333; font-weight: bold;")
+        self.lbl_info_klinis.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.lbl_info_klinis.setMinimumHeight(160)
+        
+        # Tombol Upload & Download
         btn_upload = QPushButton("Upload")
         btn_upload.setCursor(Qt.PointingHandCursor)
         btn_upload.setFixedSize(140, 45)
@@ -118,12 +127,15 @@ class DeteksiTumorApp(QMainWindow):
         self.btn_download.setStyleSheet("QPushButton { background-color: #f33b3b; color: white; font-weight: bold; border-radius: 22px; border: none; } QPushButton:hover { background-color: #cf2a2a; } QPushButton:disabled { background-color: #f79999; }")
         self.btn_download.clicked.connect(self.download_gambar)
 
-        panel_tombol.addWidget(btn_upload)
-        panel_tombol.addWidget(self.btn_download)
+        # Tata Letak Panel Kanan
+        panel_kanan.addWidget(self.lbl_info_klinis)
+        panel_kanan.addWidget(btn_upload, alignment=Qt.AlignHCenter)
+        panel_kanan.addWidget(self.btn_download, alignment=Qt.AlignHCenter)
 
+        # Gabungkan semua ke baris bawah
         baris_bawah.addLayout(panel_slider, stretch=1)
         baris_bawah.addWidget(self.panel_final, stretch=1, alignment=Qt.AlignCenter)
-        baris_bawah.addLayout(panel_tombol, stretch=1)
+        baris_bawah.addLayout(panel_kanan, stretch=1)
 
         konten_kanan.addLayout(baris_bawah)
         konten_kanan.addStretch(1) 
@@ -138,7 +150,6 @@ class DeteksiTumorApp(QMainWindow):
             else:
                 btn.setStyleSheet("QPushButton { background-color: transparent; color: #555; font-weight: bold; border-radius: 12px; padding: 12px; text-align: left; padding-left: 20px; border: none; } QPushButton:hover { background-color: #d1dced; }")
         
-        # Panggil ulang proses_gambar agar kalau ganti mode pas ada gambar, langsung update
         if self.img_bgr is not None:
             self.proses_gambar()
 
@@ -174,14 +185,14 @@ class DeteksiTumorApp(QMainWindow):
         slider.setMinimum(min_val)
         slider.setMaximum(max_val)
         slider.setValue(default_val)
-        slider.setStyleSheet("QSlider::groove:horizontal { border: none; height: 6px; background: #ccc; border-radius: 3px; } QSlider::handle:horizontal { background: #3b6af3; width: 18px; height: 18px; margin: -6px 0; border-radius: 9px; } QSlider:disabled { background: #eee; }")
+        slider.setStyleSheet("QSlider::groove:horizontal { border: none; height: 6px; background: #ccc; border-radius: 3px; } QSlider::handle:horizontal { background: #3b6af3; width: 18px; height: 18px; margin: -6px 0; border-radius: 9px; }")
         
         slider.sliderReleased.connect(self.proses_gambar)
         slider.valueChanged.connect(lambda val, l=lbl, n=nama: l.setText(f"{n}{val}"))
         
         layout.addWidget(lbl)
         layout.addWidget(slider)
-        return layout, slider # Mengembalikan (Layout, Slider)
+        return layout, slider
 
     def upload_gambar(self):
         file_name, _ = QFileDialog.getOpenFileName(self, "Buka Citra MRI", "", "Image Files (*.png *.jpg *.jpeg)")
@@ -220,7 +231,6 @@ class DeteksiTumorApp(QMainWindow):
         if self.img_bgr is None:
             return
 
-        # [FIXED] Mengambil value dari variabel QSlider yang benar
         val_thresh = self.lbl_val_th.value()
         val_circ   = self.lbl_val_circ.value() / 100.0
         val_area   = self.lbl_val_area.value()
@@ -301,11 +311,10 @@ class DeteksiTumorApp(QMainWindow):
             
             valid.append((cnt, area, circ, int(cx), int(cy), int(r)))
 
-        # 6. PENGGAMBARAN / HASIL NORMAL
+        # 6. PENGGAMBARAN & EKSTRAKSI DATA KLINIS
         thresh_rgb = cv2.cvtColor(thresh_closed, cv2.COLOR_GRAY2RGB)
         final_img = mri_rgb.copy()
 
-        # Kalau beneran gak ada putih-putih (tumor) yang lolos filter slider (OTAK SEHAT)
         if not valid:
             self.lbl_kandidat.clear()
             self.lbl_kandidat.setText("Area Bersih\n(Tidak ada anomali)")
@@ -317,16 +326,57 @@ class DeteksiTumorApp(QMainWindow):
             
             self.lbl_final.setPixmap(self.cv2_ke_qpixmap(img_normal, self.lbl_final))
             self.final_result_img = cv2.cvtColor(img_normal, cv2.COLOR_RGB2BGR)
+            
+            # Update Teks Box Klinis
+            self.lbl_info_klinis.setText("Data Klinis:\n\n✅ STATUS: NORMAL\nTidak terdeteksi anomali.")
             return
 
-        # Kalau ada tumor yang dideteksi
+        # ========================================================
+        # MENCARI BATAS TERLUAR KEPALA (SKULL BOUNDING BOX)
+        # ========================================================
+        # Ekstrak kontur dari bentuk kepala di variabel cleaned_head (dari Tahap 2)
+        contours_kepala, _ = cv2.findContours(cleaned_head, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if contours_kepala:
+            # Cari kontur terbesar (pasti itu tengkoraknya)
+            kontur_terbesar = max(contours_kepala, key=cv2.contourArea)
+            # Dapatkan koordinat X (kiri), Y (atas), lebar, dan tinggi kepala
+            x_kep, y_kep, w_kep, h_kep = cv2.boundingRect(kontur_terbesar)
+            
+            # Gambar kotak penanda kepala pakai garis tipis abu-abu biar presisi buat dokter
+            cv2.rectangle(final_img, (x_kep, y_kep), (x_kep + w_kep, y_kep + h_kep), (150, 150, 150), 1)
+            cv2.putText(final_img, "Skull Bounds", (x_kep, y_kep - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1, cv2.LINE_AA)
+        else:
+            x_kep, y_kep = 0, 0 
+
+        # Siapkan variabel teks untuk nampung data
+        info_text = "📊 Data Klinis Tumor:\n"
+
         for idx, item in enumerate(valid, 1):
-            cnt, area, circ, cx, cy, r = item
+            cnt, area_asli, circ, cx, cy, r = item
+            
             cv2.drawContours(thresh_rgb, [cnt], -1, (255, 0, 0), 2)
             cv2.circle(thresh_rgb, (cx, cy), r, (0, 255, 0), 2)
             cv2.drawContours(final_img, [cnt], -1, (0, 0, 255), 3) 
-            cv2.putText(final_img, str(idx), (cx + 55, cy + 10), 
+            
+            # Cetak nomor urut kuning di sebelah tumor
+            cv2.putText(final_img, str(idx), (cx + r + 5, cy), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 0), 2, cv2.LINE_AA)
+            
+            # ========================================================
+            # MENGHITUNG KOORDINAT RELATIF BEDAH (SURGICAL PLANNING)
+            # ========================================================
+            jarak_x_dari_kiri = cx - x_kep
+            jarak_y_dari_atas = cy - y_kep
+            
+            # Tambahkan info luas dan koordinat medis ke teks UI
+            info_text += f"\n🔹 Tumor {idx}\n"
+            info_text += f"    • Luas Area : {int(area_asli)} px\n"
+            info_text += f"    • Kedalaman (X) : {jarak_x_dari_kiri} px dari tepi\n"
+            info_text += f"    • Kedalaman (Y) : {jarak_y_dari_atas} px dari atas\n"
+
+        # Tampilkan teks ke UI Panel Kanan
+        self.lbl_info_klinis.setText(info_text)
 
         self.lbl_kandidat.setPixmap(self.cv2_ke_qpixmap(thresh_rgb, self.lbl_kandidat))
         self.lbl_final.setPixmap(self.cv2_ke_qpixmap(final_img, self.lbl_final))
