@@ -1,0 +1,340 @@
+import sys
+import cv2
+import numpy as np
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QLabel, QSlider, QPushButton, QFileDialog, QMessageBox, QFrame)
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QImage, QPixmap, QFont
+
+class DeteksiTumorApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Pendeteksi Tumor Otak - Desktop UI")
+        self.setGeometry(50, 50, 1300, 750) 
+        self.setStyleSheet("background-color: #f0f4f8;") 
+        
+        self.img_bgr = None
+        self.final_result_img = None
+        
+        # Variabel untuk menyimpan status mode saat ini
+        self.mode = "Meningioma" 
+        self.menu_buttons = {} 
+        
+        self.initUI()
+
+    def initUI(self):
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        layout_utama = QHBoxLayout(main_widget)
+        layout_utama.setContentsMargins(20, 20, 20, 20)
+        layout_utama.setSpacing(20)
+
+        # ---------------------------------------------------------
+        # SIDEBAR KIRI (MENU)
+        # ---------------------------------------------------------
+        sidebar = QFrame()
+        sidebar.setFixedWidth(220)
+        sidebar.setStyleSheet("""
+            QFrame { background-color: #e4ebf3; border-radius: 20px; }
+        """)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(15, 30, 15, 30)
+        sidebar_layout.setSpacing(15)
+
+        lbl_judul = QLabel("🧠 Pendeteksi\nTumor Otak")
+        lbl_judul.setAlignment(Qt.AlignCenter)
+        lbl_judul.setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50; border: none;")
+        sidebar_layout.addWidget(lbl_judul)
+        sidebar_layout.addSpacing(20)
+
+        menus = ["Meningioma", "Glioma", "Notumor", "Pituitary"]
+        for menu in menus:
+            btn = QPushButton(menu)
+            btn.setCursor(Qt.PointingHandCursor)
+            
+            if menu == self.mode:
+                btn.setStyleSheet("QPushButton { background-color: #3b6af3; color: white; font-weight: bold; border-radius: 12px; padding: 12px; text-align: left; padding-left: 20px; border: none; }")
+            else:
+                btn.setStyleSheet("QPushButton { background-color: transparent; color: #555; font-weight: bold; border-radius: 12px; padding: 12px; text-align: left; padding-left: 20px; border: none; } QPushButton:hover { background-color: #d1dced; }")
+            
+            btn.clicked.connect(lambda checked, m=menu: self.ubah_mode(m))
+            self.menu_buttons[menu] = btn
+            sidebar_layout.addWidget(btn)
+
+        sidebar_layout.addStretch()
+        layout_utama.addWidget(sidebar)
+
+        # ---------------------------------------------------------
+        # KONTEN UTAMA (KANAN)
+        # ---------------------------------------------------------
+        konten_kanan = QVBoxLayout()
+        konten_kanan.addStretch(1) 
+
+        baris_atas = QHBoxLayout()
+        baris_atas.setSpacing(20)
+        
+        self.panel_asli, self.lbl_asli = self.buat_panel_gambar("Gambar Asli", 260)
+        self.panel_clahe, self.lbl_clahe = self.buat_panel_gambar("Masking", 260)
+        self.panel_kandidat, self.lbl_kandidat = self.buat_panel_gambar("Threshold Execution", 260)
+        
+        baris_atas.addWidget(self.panel_asli)
+        baris_atas.addWidget(self.panel_clahe)
+        baris_atas.addWidget(self.panel_kandidat)
+        konten_kanan.addLayout(baris_atas)
+        konten_kanan.addSpacing(40) 
+
+        baris_bawah = QHBoxLayout()
+        baris_bawah.setSpacing(30)
+
+        panel_slider = QVBoxLayout()
+        panel_slider.setSpacing(15)
+        panel_slider.setAlignment(Qt.AlignVCenter)
+        
+        # PERHATIKAN: index 0 adalah layout, index 1 adalah slider (lbl_val_th dll)
+        self.slider_thresh, self.lbl_val_th = self.buat_slider_ui("Batas Kecerahan : ", 0, 255, 0)
+        self.slider_circ, self.lbl_val_circ = self.buat_slider_ui("Toleransi Lingkaran : ", 1, 90, 20)
+        self.slider_area, self.lbl_val_area = self.buat_slider_ui("Size Minimum Tumor : ", 50, 5000, 150)
+        
+        panel_slider.addLayout(self.slider_thresh)
+        panel_slider.addLayout(self.slider_circ)
+        panel_slider.addLayout(self.slider_area)
+        
+        self.panel_final, self.lbl_final = self.buat_panel_gambar("FINAL", 300)
+        
+        panel_tombol = QVBoxLayout()
+        panel_tombol.setAlignment(Qt.AlignVCenter)
+        panel_tombol.setSpacing(20)
+
+        btn_upload = QPushButton("Upload")
+        btn_upload.setCursor(Qt.PointingHandCursor)
+        btn_upload.setFixedSize(140, 45)
+        btn_upload.setStyleSheet("QPushButton { background-color: #3b6af3; color: white; font-weight: bold; border-radius: 22px; border: none; } QPushButton:hover { background-color: #2a52cf; }")
+        btn_upload.clicked.connect(self.upload_gambar)
+
+        self.btn_download = QPushButton("Download")
+        self.btn_download.setCursor(Qt.PointingHandCursor)
+        self.btn_download.setFixedSize(140, 45)
+        self.btn_download.setEnabled(False)
+        self.btn_download.setStyleSheet("QPushButton { background-color: #f33b3b; color: white; font-weight: bold; border-radius: 22px; border: none; } QPushButton:hover { background-color: #cf2a2a; } QPushButton:disabled { background-color: #f79999; }")
+        self.btn_download.clicked.connect(self.download_gambar)
+
+        panel_tombol.addWidget(btn_upload)
+        panel_tombol.addWidget(self.btn_download)
+
+        baris_bawah.addLayout(panel_slider, stretch=1)
+        baris_bawah.addWidget(self.panel_final, stretch=1, alignment=Qt.AlignCenter)
+        baris_bawah.addLayout(panel_tombol, stretch=1)
+
+        konten_kanan.addLayout(baris_bawah)
+        konten_kanan.addStretch(1) 
+        layout_utama.addLayout(konten_kanan)
+
+    def ubah_mode(self, mode_baru):
+        self.mode = mode_baru
+        
+        for menu, btn in self.menu_buttons.items():
+            if menu == self.mode:
+                btn.setStyleSheet("QPushButton { background-color: #3b6af3; color: white; font-weight: bold; border-radius: 12px; padding: 12px; text-align: left; padding-left: 20px; border: none; }")
+            else:
+                btn.setStyleSheet("QPushButton { background-color: transparent; color: #555; font-weight: bold; border-radius: 12px; padding: 12px; text-align: left; padding-left: 20px; border: none; } QPushButton:hover { background-color: #d1dced; }")
+        
+        # Panggil ulang proses_gambar agar kalau ganti mode pas ada gambar, langsung update
+        if self.img_bgr is not None:
+            self.proses_gambar()
+
+    def buat_panel_gambar(self, title, size):
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.setAlignment(Qt.AlignCenter)
+        
+        lbl_title = QLabel(title)
+        lbl_title.setAlignment(Qt.AlignCenter)
+        lbl_title.setFixedHeight(35)
+        lbl_title.setStyleSheet("background-color: #3b6af3; color: white; font-weight: bold; border-radius: 17px;")
+        
+        lbl_img = QLabel()
+        lbl_img.setAlignment(Qt.AlignCenter)
+        lbl_img.setFixedSize(size, size)
+        lbl_img.setStyleSheet("background-color: white; border: 2px solid #ccc; border-radius: 15px;")
+        
+        layout.addWidget(lbl_title)
+        layout.addWidget(lbl_img)
+        return panel, lbl_img
+
+    def buat_slider_ui(self, nama, min_val, max_val, default_val):
+        layout = QVBoxLayout()
+        layout.setSpacing(5)
+        
+        lbl = QLabel(f"{nama}{default_val}")
+        lbl.setStyleSheet("color: #444; font-weight: bold; font-size: 13px; border: none;")
+        
+        slider = QSlider(Qt.Horizontal)
+        slider.setMinimum(min_val)
+        slider.setMaximum(max_val)
+        slider.setValue(default_val)
+        slider.setStyleSheet("QSlider::groove:horizontal { border: none; height: 6px; background: #ccc; border-radius: 3px; } QSlider::handle:horizontal { background: #3b6af3; width: 18px; height: 18px; margin: -6px 0; border-radius: 9px; } QSlider:disabled { background: #eee; }")
+        
+        slider.sliderReleased.connect(self.proses_gambar)
+        slider.valueChanged.connect(lambda val, l=lbl, n=nama: l.setText(f"{n}{val}"))
+        
+        layout.addWidget(lbl)
+        layout.addWidget(slider)
+        return layout, slider # Mengembalikan (Layout, Slider)
+
+    def upload_gambar(self):
+        file_name, _ = QFileDialog.getOpenFileName(self, "Buka Citra MRI", "", "Image Files (*.png *.jpg *.jpeg)")
+        if file_name:
+            self.img_bgr = cv2.imread(file_name)
+            if self.img_bgr is not None:
+                self.btn_download.setEnabled(True)
+                self.proses_gambar() 
+            else:
+                QMessageBox.warning(self, "Error", "Gagal memuat gambar!")
+
+    def download_gambar(self):
+        if self.final_result_img is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Simpan Hasil Deteksi", "hasil_tumor_final.jpg", "JPEG (*.jpg);;PNG (*.png)")
+        if path:
+            cv2.imwrite(path, self.final_result_img)
+            QMessageBox.information(self, "Sukses", f"Gambar berhasil disimpan di:\n{path}")
+
+    def cv2_ke_qpixmap(self, cv_img, target_label):
+        if len(cv_img.shape) == 2:
+            h, w = cv_img.shape
+            bytes_per_line = w
+            qt_img = QImage(cv_img.data, w, h, bytes_per_line, QImage.Format_Grayscale8)
+        else:
+            h, w, ch = cv_img.shape
+            bytes_per_line = ch * w
+            qt_img = QImage(cv_img.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        
+        return QPixmap.fromImage(qt_img).scaled(target_label.width(), target_label.height(), Qt.KeepAspectRatio)
+
+    # ---------------------------------------------------------
+    # ALGORITMA OPENCV
+    # ---------------------------------------------------------
+    def proses_gambar(self):
+        if self.img_bgr is None:
+            return
+
+        # [FIXED] Mengambil value dari variabel QSlider yang benar
+        val_thresh = self.lbl_val_th.value()
+        val_circ   = self.lbl_val_circ.value() / 100.0
+        val_area   = self.lbl_val_area.value()
+
+        # 1. PRE-PROCESSING
+        img_rgb  = cv2.cvtColor(self.img_bgr, cv2.COLOR_BGR2RGB)
+        img_gray = cv2.cvtColor(self.img_bgr, cv2.COLOR_BGR2GRAY)
+        self.lbl_asli.setPixmap(self.cv2_ke_qpixmap(img_rgb, self.lbl_asli))
+
+        not_white = img_gray < 254
+        rows = np.any(not_white, axis=1)
+        cols = np.any(not_white, axis=0)
+        if rows.any() and cols.any():
+            rmin, rmax = np.where(rows)[0][[0, -1]]
+            cmin, cmax = np.where(cols)[0][[0, -1]]
+            mri_rgb  = img_rgb[rmin:rmax, cmin:cmax]
+            mri_gray = img_gray[rmin:rmax, cmin:cmax].copy()
+            mri_gray[mri_gray > 253] = 0   
+        else:
+            mri_rgb  = img_rgb
+            mri_gray = img_gray.copy()
+        h, w = mri_gray.shape
+
+        # 2. SKULL STRIPPING
+        _, head_mask = cv2.threshold(mri_gray, 15, 255, cv2.THRESH_BINARY)
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15,15))
+        closed_head  = cv2.morphologyEx(head_mask, cv2.MORPH_CLOSE, kernel_close)
+        
+        kernel_clean = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5,5))
+        cleaned_head = cv2.morphologyEx(closed_head, cv2.MORPH_OPEN, kernel_clean)
+        
+        kernel_agg   = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25,25))
+        mask_pedoman = cv2.erode(cleaned_head, kernel_agg, iterations=1)
+        
+        brain_only = cv2.bitwise_and(mri_gray, mask_pedoman)
+
+        # 3. ENHANCEMENT
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        brain_enhanced = clahe.apply(brain_only)
+        blurred_brain  = cv2.bilateralFilter(brain_enhanced, 7, 50, 50)
+        self.lbl_clahe.setPixmap(self.cv2_ke_qpixmap(blurred_brain, self.lbl_clahe))
+        self.lbl_kandidat.setStyleSheet("background-color: white; border: 2px solid #ccc; border-radius: 15px;")
+
+        # 4. SEGMENTASI
+        brain_pixels = blurred_brain[blurred_brain > 15]
+        if len(brain_pixels) > 0:
+            if val_thresh == 0:
+                thresh_val, _ = cv2.threshold(brain_pixels, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                _, thresh = cv2.threshold(blurred_brain, thresh_val, 255, cv2.THRESH_BINARY)
+            else:
+                _, thresh = cv2.threshold(blurred_brain, val_thresh, 255, cv2.THRESH_BINARY)
+        else:
+            thresh = np.zeros_like(blurred_brain)
+
+        kernel_morph = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7,7))
+        thresh_closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel_morph)
+        thresh_closed = cv2.morphologyEx(thresh_closed, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3,3)))
+        
+        contours, _ = cv2.findContours(thresh_closed, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+
+        # 5. FEATURE EXTRACTION
+        valid = []
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area < val_area or area > 50000:
+                continue
+            
+            peri = cv2.arcLength(cnt, True)
+            if peri == 0:
+                continue
+            circ = 4 * np.pi * area / (peri ** 2)
+            if circ < val_circ:
+                continue
+            
+            (cx, cy), r = cv2.minEnclosingCircle(cnt)
+            if cx < 10 or cx > w - 10 or cy < 10 or cy > h - 10:
+                continue
+            
+            valid.append((cnt, area, circ, int(cx), int(cy), int(r)))
+
+        # 6. PENGGAMBARAN / HASIL NORMAL
+        thresh_rgb = cv2.cvtColor(thresh_closed, cv2.COLOR_GRAY2RGB)
+        final_img = mri_rgb.copy()
+
+        # Kalau beneran gak ada putih-putih (tumor) yang lolos filter slider (OTAK SEHAT)
+        if not valid:
+            self.lbl_kandidat.clear()
+            self.lbl_kandidat.setText("Area Bersih\n(Tidak ada anomali)")
+            self.lbl_final.clear()
+            
+            img_normal = mri_rgb.copy()
+            cv2.putText(img_normal, "STATUS: NORMAL (NO TUMOR)", (15, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
+            
+            self.lbl_final.setPixmap(self.cv2_ke_qpixmap(img_normal, self.lbl_final))
+            self.final_result_img = cv2.cvtColor(img_normal, cv2.COLOR_RGB2BGR)
+            return
+
+        # Kalau ada tumor yang dideteksi
+        for idx, item in enumerate(valid, 1):
+            cnt, area, circ, cx, cy, r = item
+            cv2.drawContours(thresh_rgb, [cnt], -1, (255, 0, 0), 2)
+            cv2.circle(thresh_rgb, (cx, cy), r, (0, 255, 0), 2)
+            cv2.drawContours(final_img, [cnt], -1, (0, 0, 255), 3) 
+            cv2.putText(final_img, str(idx), (cx + 55, cy + 10), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 0), 2, cv2.LINE_AA)
+
+        self.lbl_kandidat.setPixmap(self.cv2_ke_qpixmap(thresh_rgb, self.lbl_kandidat))
+        self.lbl_final.setPixmap(self.cv2_ke_qpixmap(final_img, self.lbl_final))
+        self.final_result_img = cv2.cvtColor(final_img, cv2.COLOR_RGB2BGR)
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    app.setFont(QFont("Poppins", 10))
+    window = DeteksiTumorApp()
+    window.show()
+    sys.exit(app.exec_())

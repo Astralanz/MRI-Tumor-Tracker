@@ -1,0 +1,175 @@
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+from skimage.color import rgb2gray
+from skimage.filters import gaussian
+from skimage.segmentation import active_contour
+ 
+image_path = 'tumor2.jpg' 
+img_bgr = cv2.imread(image_path)
+ 
+if img_bgr is None:
+    print("Error: Gambar gak ketemu! Cek nama file dan foldernya.")
+else:
+    img_rgb  = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    img_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+ 
+    not_white = img_gray < 254
+    rows = np.any(not_white, axis=1)
+    cols = np.any(not_white, axis=0)
+ 
+    if rows.any() and cols.any():
+        rmin, rmax = np.where(rows)[0][[0, -1]]
+        cmin, cmax = np.where(cols)[0][[0, -1]]
+        mri_rgb  = img_rgb[rmin:rmax, cmin:cmax]
+        mri_gray = img_gray[rmin:rmax, cmin:cmax].copy()
+        mri_gray[mri_gray > 253] = 0   # hapus sisa background putih
+    else:
+        mri_rgb  = img_rgb
+        mri_gray = img_gray.copy()
+ 
+    # ==========================================
+    # 3. SKULL STRIPPING
+    #    Hapus lapisan tengkorak supaya deteksi
+    #    fokus ke dalam otak saja
+    # ==========================================
+    _, head_thresh = cv2.threshold(mri_gray, 20, 255, cv2.THRESH_BINARY)
+    head_cnts, _  = cv2.findContours(head_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+ 
+    head_mask = np.zeros_like(mri_gray)
+    if head_cnts:
+        cv2.drawContours(head_mask, [max(head_cnts, key=cv2.contourArea)],
+                         -1, 255, thickness=cv2.FILLED)
+ 
+    kernel      = np.ones((7, 7), np.uint8) #Mengatur seberapa bersih tengkorak kepala terkikis saat proses Skull Stripping.
+    eroded_head = cv2.erode(head_mask, kernel, iterations=3)
+    brain_only  = cv2.bitwise_and(mri_gray, eroded_head)
+ 
+    # ==========================================
+    # 4. DETEKSI TUMOR DENGAN PERCENTILE THRESHOLD
+    #    Pakai persentil ke-90 dari piksel otak
+    #    → adaptif, gak perlu atur angka manual
+    # ==========================================
+    brain_pixels = brain_only[brain_only > 10]
+    t90 = np.percentile(brain_pixels, 90) #Menentukan standar kecerahan untuk memisahkan tumor dari jaringan otak normal.
+ 
+    blurred_brain = cv2.GaussianBlur(brain_only, (5, 5), 0)
+    _, thresh     = cv2.threshold(blurred_brain, int(t90), 255, cv2.THRESH_BINARY)
+ 
+    # Sambungin piksel yang putus-putus
+    close_kernel  = np.ones((9, 9), np.uint8)
+    thresh_closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, close_kernel)
+    thresh_closed = cv2.morphologyEx(thresh_closed, cv2.MORPH_OPEN,
+                                     np.ones((3, 3), np.uint8))
+ 
+    contours, _ = cv2.findContours(thresh_closed, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+ 
+    # ==========================================
+    # 5. FILTER KANDIDAT TUMOR
+    #    Tumor = area yang cukup bulat (circularity tinggi)
+    #    Score = area × circularity
+    # ==========================================
+    h_mri, w_mri = mri_gray.shape
+    valid = []
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if area < 200 or area > 20000:
+            continue
+        peri = cv2.arcLength(cnt, True)
+        if peri == 0:
+            continue
+        circ = 4 * np.pi * area / (peri ** 2)
+        if circ < 0.35:
+            continue
+        (cx, cy), r = cv2.minEnclosingCircle(cnt)
+        # Abaikan kontur yang terlalu mepet ke pinggir gambar
+        if cx < 40 or cx > w_mri - 40 or cy < 40 or cy > h_mri - 40:
+            continue
+        valid.append((cnt, area, circ, int(cx), int(cy), int(r)))
+ 
+    if not valid:
+        # ==========================================
+        # MODE DEBUG: Tampilkan tiap tahap
+        # ==========================================
+        print("Tumor tidak ditemukan! Turunin threshold (coba ganti 90 → 85).")
+        fig, axes = plt.subplots(1, 4, figsize=(20, 5))
+        titles = ['1. MRI Asli', '2. Otak (Skull Stripped)',
+                  '3. Blurred', '4. Threshold p90']
+        imgs   = [mri_rgb, brain_only, blurred_brain, thresh_closed]
+        cmaps  = [None, 'gray', 'gray', 'gray']
+        for ax, title, im, cm in zip(axes, titles, imgs, cmaps):
+            ax.imshow(im, cmap=cm)
+            ax.set_title(title)
+            ax.axis('off')
+        plt.tight_layout()
+        plt.savefig('debug_tumor.png', dpi=150, bbox_inches='tight')
+        plt.show()
+ 
+    else:
+        # Pilih kontur dengan score terbaik
+        best = max(valid, key=lambda x: x[1] * x[2])
+        cnt, area, circ, cx, cy, r = best
+        print(f"Tumor ditemukan! center=({cx},{cy}), radius={r}px, "
+              f"area={int(area)}px², circularity={circ:.2f}")
+ 
+        # ==========================================
+        # 6. INISIALISASI & JALANKAN ACTIVE CONTOUR
+        # ==========================================
+        radius_init = r + 15   # tambahin margin dikit biar snake mulai dari luar
+        s    = np.linspace(0, 2 * np.pi, 400)
+        init = np.array([
+            cy + radius_init * np.sin(s),
+            cx + radius_init * np.cos(s)
+        ]).T
+ 
+        mri_gray_sk  = rgb2gray(mri_rgb)
+        img_smooth   = gaussian(mri_gray_sk, sigma=1.5, preserve_range=False)
+ 
+        # alpha kecil  = elastisitas rendah → snake bisa menyesuaikan bentuk tumor
+        # beta tinggi  = kekakuan tinggi    → gak nyangkut di urat-urat otak kecil
+        snake = active_contour(
+            img_smooth, init,
+            alpha=0.015,
+            beta=5,
+            gamma=0.001,
+            max_num_iter=2500,
+        )
+ 
+        # ==========================================
+        # 7. VISUALISASI HASIL
+        # ==========================================
+        fig, axes = plt.subplots(1, 2, figsize=(16, 8))
+ 
+        # Kiri: tampilan penuh
+        axes[0].imshow(mri_rgb)
+        axes[0].plot(init[:, 1], init[:, 0], '--r', lw=2,
+                     label='Init Circle (Otomatis)')
+        axes[0].plot(snake[:, 1], snake[:, 0], '-b', lw=2.5,
+                     label='Active Contour (Presisi)')
+        axes[0].set_title('Deteksi Tumor – Full View', fontsize=14, fontweight='bold')
+        axes[0].legend()
+        axes[0].axis('off')
+ 
+        # Kanan: zoom ke area tumor
+        pad  = 80
+        xmin = max(0, cx - r - pad);  xmax = min(w_mri, cx + r + pad)
+        ymin = max(0, cy - r - pad);  ymax = min(h_mri, cy + r + pad)
+ 
+        axes[1].imshow(mri_rgb[ymin:ymax, xmin:xmax])
+        axes[1].plot(init[:, 1] - xmin, init[:, 0] - ymin,
+                     '--r', lw=2, label='Init Circle')
+        axes[1].plot(snake[:, 1] - xmin, snake[:, 0] - ymin,
+                     '-b', lw=2.5, label='Active Contour')
+        axes[1].set_title('Zoom Area Tumor', fontsize=14, fontweight='bold')
+        axes[1].legend()
+        axes[1].axis('off')
+ 
+        plt.suptitle(
+            'Deteksi Tumor MRI – Full Otomatis (Skull Stripping + Active Contour)',
+            fontsize=13, fontweight='bold'
+        )
+        plt.tight_layout()
+        plt.savefig('hasil_deteksi_tumor.png', dpi=150, bbox_inches='tight')
+        plt.show()
+        print("Hasil disimpan: hasil_deteksi_tumor.png")
+ 

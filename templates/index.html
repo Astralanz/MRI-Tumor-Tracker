@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pendeteksi Tumor Otak</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #f4f6f9; height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .app { display: flex; height: 530px; width: 900px; border: 1px solid #e0e0e0; border-radius: 14px; overflow: hidden; background: #f4f6f9; box-shadow: 0 4px 24px rgba(0,0,0,0.07); }
+
+    .sidebar { width: 200px; min-width: 200px; background: #fff; border-right: 1px solid #e8e8e8; display: flex; flex-direction: column; padding: 16px 0; }
+    .profile { display: flex; align-items: center; gap: 10px; padding: 0 14px 14px; border-bottom: 1px solid #f0f0f0; }
+    .avatar { width: 36px; height: 36px; border-radius: 50%; background: #e6f1fb; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #185FA5; flex-shrink: 0; }
+    .pname { font-size: 12px; font-weight: 600; color: #1a1a1a; line-height: 1.3; }
+    .pnim { font-size: 10px; color: #999; }
+    .nav { padding: 10px 0; flex: 1; }
+    .nav-item { display: flex; align-items: center; gap: 8px; padding: 9px 14px; font-size: 12.5px; color: #666; cursor: pointer; border-left: 2px solid transparent; transition: all 0.15s; }
+    .nav-item:hover { background: #f4f6f9; color: #1a1a1a; }
+    .nav-item.active { background: #e6f1fb; color: #185FA5; border-left: 2px solid #378ADD; font-weight: 600; }
+    .nav-item i { font-size: 15px; }
+
+    .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .topbar { padding: 14px 18px 12px; border-bottom: 1px solid #f0f0f0; background: #fff; }
+    .topbar h1 { font-size: 17px; font-weight: 600; color: #1a1a1a; }
+    .topbar p { font-size: 11.5px; color: #999; margin-top: 2px; }
+
+    .content { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 14px; overflow: hidden; }
+    .left-col { display: flex; flex-direction: column; gap: 12px; }
+
+    .upload-card { background: #fff; border: 1.5px dashed #b5d4f4; border-radius: 12px; padding: 20px 14px; display: flex; flex-direction: column; align-items: center; gap: 9px; cursor: pointer; flex: 1; transition: border-color 0.2s; }
+    .upload-card:hover { border-color: #378ADD; }
+    .upload-card.has-file { border-color: #639922; border-style: solid; }
+    .upload-icon { font-size: 28px; color: #378ADD; }
+    .upload-label { font-size: 13px; font-weight: 600; color: #1a1a1a; }
+    .upload-sub { font-size: 11px; color: #aaa; text-align: center; }
+    .btn-primary { background: #378ADD; color: #fff; border: none; border-radius: 8px; padding: 8px 18px; font-size: 12.5px; font-weight: 600; cursor: pointer; width: 100%; transition: background 0.15s; }
+    .btn-primary:hover { background: #185FA5; }
+    .file-ok { font-size: 11px; color: #3B6D11; }
+
+    .stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .stat-card { background: #fff; border: 1px solid #f0f0f0; border-radius: 8px; padding: 11px 13px; }
+    .slabel { font-size: 10.5px; color: #aaa; margin-bottom: 3px; display: flex; align-items: center; gap: 4px; }
+    .sdot { width: 6px; height: 6px; border-radius: 50%; background: #63d9a0; display: inline-block; }
+    .sval { font-size: 20px; font-weight: 600; color: #1a1a1a; }
+    .sunit { font-size: 11px; color: #bbb; }
+    .sgreen { font-size: 11px; color: #3B6D11; font-weight: 600; }
+
+    .right-col { display: flex; flex-direction: column; gap: 10px; }
+    .result-card { background: #fff; border: 1px solid #f0f0f0; border-radius: 12px; flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+    .result-header { display: flex; align-items: center; justify-content: space-between; padding: 11px 13px; border-bottom: 1px solid #f0f0f0; }
+    .rtitle { font-size: 12.5px; font-weight: 600; color: #1a1a1a; }
+    .badge-ready { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: #3B6D11; background: #EAF3DE; padding: 3px 9px; border-radius: 99px; }
+    .badge-wait  { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: #854F0B; background: #FAEEDA; padding: 3px 9px; border-radius: 99px; }
+    .badge-error { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: #A32D2D; background: #FCEBEB; padding: 3px 9px; border-radius: 99px; }
+    .bdot-green { width: 6px; height: 6px; border-radius: 50%; background: #63d9a0; animation: pulse 1.5s infinite; }
+    .bdot-amber { width: 6px; height: 6px; border-radius: 50%; background: #EF9F27; }
+    .bdot-red   { width: 6px; height: 6px; border-radius: 50%; background: #E24B4A; }
+    @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.35;} }
+
+    .img-view { flex: 1; background: #f7f8fa; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .placeholder-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; color: #ccc; }
+    .placeholder-wrap i { font-size: 38px; }
+    .placeholder-wrap span { font-size: 11.5px; }
+    .result-img { width: 100%; height: 100%; object-fit: contain; display: none; }
+    .processing { display: none; flex-direction: column; align-items: center; gap: 10px; }
+    .spinner { width: 28px; height: 28px; border: 2.5px solid #e0e0e0; border-top-color: #378ADD; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .proc-text { font-size: 11.5px; color: #aaa; }
+    .error-msg { font-size: 12px; color: #A32D2D; text-align: center; padding: 0 16px; }
+
+    .btn-dl { display: flex; align-items: center; justify-content: center; gap: 6px; background: #378ADD; color: #fff; border: none; border-radius: 8px; padding: 10px; font-size: 12.5px; font-weight: 600; cursor: pointer; width: 100%; transition: background 0.15s; }
+    .btn-dl:hover { background: #185FA5; }
+    .btn-dl:disabled { background: #b5d4f4; cursor: not-allowed; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="profile">
+      <div class="avatar">MF</div>
+      <div>
+        <div class="pname">Dr. Muhammad Fahri</div>
+        <div class="pnim">NIM: 210101234</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <div class="nav-item active"><i class="ti ti-brain"></i> Pendeteksi Tumor</div>
+      <div class="nav-item"><i class="ti ti-history"></i> Riwayat Analisis</div>
+      <div class="nav-item"><i class="ti ti-info-circle"></i> Tentang Kami</div>
+    </nav>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <h1>Pendeteksi Tumor Otak</h1>
+      <p>Unggah hasil pemindaian MRI untuk analisis segmentasi.</p>
+    </div>
+
+    <div class="content">
+      <div class="left-col">
+        <div class="upload-card" id="uploadCard" onclick="document.getElementById('fin').click()">
+          <i class="ti ti-cloud-upload upload-icon"></i>
+          <div class="upload-label">Unggah Gambar MRI</div>
+          <div class="upload-sub">Mendukung format PNG atau JPG</div>
+          <button class="btn-primary" onclick="event.stopPropagation(); document.getElementById('fin').click()">Pilih File</button>
+          <div class="file-ok" id="finfo"></div>
+          <input type="file" id="fin" class="hidden" accept=".jpg,.jpeg,.png" onchange="onFile(this)">
+        </div>
+        <div class="stats-row">
+          <div class="stat-card">
+            <div class="slabel"><span class="sdot"></span> Total Pemindaian</div>
+            <div class="sgreen">Kuota Berjalan Aktif</div>
+          </div>
+          <div class="stat-card">
+            <div class="slabel"><i class="ti ti-calendar" style="font-size:13px"></i> Bulan Ini</div>
+            <div><span class="sval" id="sc">71</span> <span class="sunit">sesi</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="right-col">
+        <div class="result-card">
+          <div class="result-header">
+            <span class="rtitle">Hasil Analisis Citra</span>
+            <span class="badge-wait" id="badge">
+              <span class="bdot-amber"></span>Menunggu Gambar
+            </span>
+          </div>
+          <div class="img-view">
+            <div class="placeholder-wrap" id="placeholder">
+              <i class="ti ti-photo-scan"></i>
+              <span>Unggah MRI untuk melihat hasil</span>
+            </div>
+            <div class="processing" id="proc">
+              <div class="spinner"></div>
+              <div class="proc-text">Menganalisis gambar MRI...</div>
+            </div>
+            <div class="error-msg hidden" id="errMsg"></div>
+            <img class="result-img" id="resultImg" alt="Hasil deteksi tumor MRI">
+          </div>
+        </div>
+        <button class="btn-dl" id="dlBtn" disabled onclick="downloadResult()">
+          <i class="ti ti-download"></i>
+          Unduh Hasil Pemindaian (.PNG)
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let resultBlob = null;
+
+  function onFile(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    document.getElementById('uploadCard').classList.add('has-file');
+    document.getElementById('finfo').textContent = '✓ ' + file.name;
+    document.getElementById('sc').textContent = parseInt(document.getElementById('sc').textContent) + 1;
+
+    document.getElementById('placeholder').style.display = 'none';
+    document.getElementById('proc').style.display = 'flex';
+    document.getElementById('resultImg').style.display = 'none';
+    document.getElementById('errMsg').classList.add('hidden');
+    document.getElementById('badge').className = 'badge-wait';
+    document.getElementById('badge').innerHTML = '<span class="bdot-amber"></span>Memproses...';
+    document.getElementById('dlBtn').disabled = true;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    fetch('/analyze', { method: 'POST', body: formData })
+      .then(res => {
+        if (!res.ok) return res.json().then(d => { throw new Error(d.error || 'Gagal memproses'); });
+        return res.blob();
+      })
+      .then(blob => {
+        resultBlob = blob;
+        const url = URL.createObjectURL(blob);
+        const img = document.getElementById('resultImg');
+        img.src = url;
+        img.style.display = 'block';
+        document.getElementById('proc').style.display = 'none';
+        document.getElementById('badge').className = 'badge-ready';
+        document.getElementById('badge').innerHTML = '<span class="bdot-green"></span>Siap Diunduh';
+        document.getElementById('dlBtn').disabled = false;
+      })
+      .catch(err => {
+        document.getElementById('proc').style.display = 'none';
+        document.getElementById('errMsg').textContent = err.message;
+        document.getElementById('errMsg').classList.remove('hidden');
+        document.getElementById('badge').className = 'badge-error';
+        document.getElementById('badge').innerHTML = '<span class="bdot-red"></span>Gagal';
+      });
+  }
+
+  function downloadResult() {
+    if (!resultBlob) return;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(resultBlob);
+    a.download = 'hasil_deteksi_tumor.png';
+    a.click();
+  }
+</script>
+
+</body>
+</html>
