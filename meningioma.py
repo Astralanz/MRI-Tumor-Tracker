@@ -2,10 +2,181 @@ import sys
 import cv2
 import numpy as np
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QLabel, QSlider, QPushButton, QFileDialog, QMessageBox, QFrame)
+                             QHBoxLayout, QLabel, QSlider, QPushButton, QFileDialog, 
+                             QMessageBox, QFrame, QDialog, QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QImage, QPixmap, QFont
 
+# =========================================================
+# KELAS DIALOG PERBANDINGAN
+# =========================================================
+class ComparisonDialog(QDialog):
+    def __init__(self, results, parent=None):
+        super().__init__(parent)
+        self.results = results
+        self.setWindowTitle("Perbandingan Hasil Uji")
+        self.resize(1180, 760)
+        self.setStyleSheet("background-color: #f5f7fb;")
+        self.build_ui()
+
+    def build_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(18, 18, 18, 18)
+        main_layout.setSpacing(14)
+
+        title = QLabel("Perbandingan Hasil Deteksi MRI Tumor")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #1f2937; border:none;")
+        main_layout.addWidget(title)
+
+        subtitle = QLabel("Popup ini menampilkan 2 gambar hasil uji yang sudah disimpan, lalu dibandingkan bersama data area, titik pusat, dan lokasi tumor.")
+        subtitle.setWordWrap(True)
+        subtitle.setAlignment(Qt.AlignCenter)
+        subtitle.setStyleSheet("font-size: 12px; color: #475569; border:none;")
+        main_layout.addWidget(subtitle)
+
+        images_row = QHBoxLayout()
+        images_row.setSpacing(16)
+        for idx, item in enumerate(self.results, 1):
+            images_row.addWidget(self.build_result_card(idx, item))
+        main_layout.addLayout(images_row)
+
+        table_card = QFrame()
+        table_card.setStyleSheet("QFrame { background-color: white; border: 2px solid #d5dde8; border-radius: 18px; }")
+        table_layout = QVBoxLayout(table_card)
+        table_layout.setContentsMargins(14, 14, 14, 14)
+        table_layout.setSpacing(10)
+
+        table_title = QLabel("Tabel Perbandingan (Berdasarkan Tumor Terbesar/Pertama)")
+        table_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #203040; border:none;")
+        table_layout.addWidget(table_title)
+
+        table = QTableWidget(len(self.results), 8)
+        table.setHorizontalHeaderLabels([
+            "No", "Kelas", "Status", "Luas px", "Luas cm²",
+            "Diameter cm", "Titik Pusat", "Lokasi Relatif"
+        ])
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionMode(QTableWidget.NoSelection)
+        table.setAlternatingRowColors(True)
+        table.setStyleSheet(
+            "QTableWidget { background-color:white; font-size:12px; gridline-color:#dfe7f1; }"
+            "QHeaderView::section { background-color:#3b6af3; color:white; font-weight:bold; padding:7px; border:none; }"
+        )
+
+        for row, item in enumerate(self.results):
+            values = [
+                str(row + 1),
+                item.get("mode", "-"),
+                item.get("status", "-"),
+                str(item.get("area_px", "-")),
+                str(item.get("area_cm2", "-")),
+                str(item.get("diameter_cm", "-")),
+                str(item.get("center", "-")),
+                str(item.get("lokasi", "-")),
+            ]
+            for col, val in enumerate(values):
+                qitem = QTableWidgetItem(val)
+                qitem.setTextAlignment(Qt.AlignCenter)
+                table.setItem(row, col, qitem)
+        table_layout.addWidget(table)
+        main_layout.addWidget(table_card)
+
+        conclusion = QLabel(self.build_summary_text())
+        conclusion.setWordWrap(True)
+        conclusion.setStyleSheet("background-color: white; border: 2px solid #d5dde8; border-radius: 16px; padding: 12px; font-size: 12px; color:#2c3e50; font-weight: bold;")
+        main_layout.addWidget(conclusion)
+
+        close_btn = QPushButton("Tutup")
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setFixedSize(140, 40)
+        close_btn.setStyleSheet("QPushButton { background-color:#3b6af3; color:white; font-weight:bold; border:none; border-radius:20px; } QPushButton:hover { background-color:#2a52cf; }")
+        close_btn.clicked.connect(self.accept)
+
+        footer = QHBoxLayout()
+        footer.addStretch()
+        footer.addWidget(close_btn)
+        footer.addStretch()
+        main_layout.addLayout(footer)
+
+    def build_result_card(self, idx, item):
+        card = QFrame()
+        card.setStyleSheet("QFrame { background-color: white; border: 2px solid #d5dde8; border-radius: 18px; }")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        title = QLabel(f"Hasil Uji {idx} - {item.get('mode', '-')}")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #203040; border:none;")
+        layout.addWidget(title)
+
+        lbl_img = QLabel()
+        lbl_img.setAlignment(Qt.AlignCenter)
+        lbl_img.setFixedSize(500, 260)
+        lbl_img.setStyleSheet("background-color:#f8fafc; border: 2px solid #dbe4f0; border-radius: 14px; color:#64748b;")
+
+        preview = item.get("result_preview")
+        if preview is not None:
+            lbl_img.setPixmap(self.cv2_to_pixmap(preview, lbl_img.width(), lbl_img.height()))
+        else:
+            lbl_img.setText("Preview tidak tersedia")
+        layout.addWidget(lbl_img)
+
+        info = QLabel(
+            f"Status: {item.get('status', '-')}\n"
+            f"Titik pusat: {item.get('center', '-')}\n"
+            f"Luas: {item.get('area_px', '-')} px | {item.get('area_cm2', '-')} cm²"
+        )
+        info.setWordWrap(True)
+        info.setStyleSheet("font-size: 12px; color:#334155; font-weight:bold; border:none;")
+        layout.addWidget(info)
+        return card
+
+    def build_summary_text(self):
+        if len(self.results) < 2:
+            return "Kesimpulan: data uji minimal 2 gambar diperlukan untuk perbandingan."
+
+        a = self.results[0]
+        b = self.results[1]
+        area_a = int(a.get("area_px", 0)) if str(a.get("area_px", "0")).isdigit() else 0
+        area_b = int(b.get("area_px", 0)) if str(b.get("area_px", "0")).isdigit() else 0
+
+        if area_a > 0 and area_b == 0:
+            detail = "Hasil uji kedua menunjukkan tidak ada tumor terdeteksi, sehingga dapat dipakai sebagai contoh perbaikan kondisi pasien setelah follow-up. Ini cocok untuk skenario pasien sebelumnya masih terdeteksi tumor, kemudian setelah operasi hasilnya bersih."
+        elif area_a == 0 and area_b > 0:
+            detail = "Hasil uji kedua menunjukkan area tumor muncul/masih terdeteksi, sehingga kondisi perlu dipantau lebih lanjut."
+        elif area_b < area_a:
+            detail = "Luas area pada hasil uji kedua lebih kecil dibanding hasil pertama, sehingga secara visual terlihat adanya penurunan area kandidat tumor."
+        elif area_b > area_a:
+            detail = "Luas area pada hasil uji kedua lebih besar dibanding hasil pertama, sehingga secara visual terlihat peningkatan area kandidat tumor."
+        else:
+            detail = "Nilai area kedua hasil uji relatif sama, sehingga kondisi visual terlihat stabil pada dua pemeriksaan."
+
+        return (
+            "Kesimpulan Perbandingan:\n"
+            f"- Hasil uji 1: {a.get('mode', '-')} | status: {a.get('status', '-')}\n"
+            f"- Hasil uji 2: {b.get('mode', '-')} | status: {b.get('status', '-')}\n"
+            f"- {detail}"
+        )
+
+    @staticmethod
+    def cv2_to_pixmap(cv_img, target_w, target_h):
+        safe_img = np.ascontiguousarray(cv_img)
+        if len(safe_img.shape) == 2:
+            h, w = safe_img.shape
+            q_img = QImage(safe_img.data, w, h, w, QImage.Format_Grayscale8)
+        else:
+            h, w, ch = safe_img.shape
+            q_img = QImage(safe_img.data, w, h, ch * w, QImage.Format_RGB888)
+        return QPixmap.fromImage(q_img).scaled(target_w, target_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+
+# =========================================================
+# KELAS UTAMA (Patokan)
+# =========================================================
 class DeteksiTumorApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -18,6 +189,10 @@ class DeteksiTumorApp(QMainWindow):
         
         self.mode = "Meningioma" 
         self.menu_buttons = {} 
+        
+        # Variabel untuk menampung data perbandingan
+        self.last_result_data = None
+        self.comparison_results = []
         
         self.initUI()
 
@@ -40,13 +215,15 @@ class DeteksiTumorApp(QMainWindow):
         sidebar_layout.setContentsMargins(15, 30, 15, 30)
         sidebar_layout.setSpacing(15)
 
-        lbl_judul = QLabel("🧠 Pendeteksi\nTumor Otak")
+        lbl_judul = QLabel("🧠 MRI Tumor Otak\nTracker")
         lbl_judul.setAlignment(Qt.AlignCenter)
         lbl_judul.setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50; border: none;")
         sidebar_layout.addWidget(lbl_judul)
         sidebar_layout.addSpacing(20)
 
-        menus = ["Meningioma", "Glioma", "Notumor", "Pituitary"]
+        # BAGIAN YANG DIUBAH: Menghapus "Glioma", "Notumor", dan "Pituitary"
+        menus = ["Meningioma"]
+        
         for menu in menus:
             btn = QPushButton(menu)
             btn.setCursor(Qt.PointingHandCursor)
@@ -82,7 +259,7 @@ class DeteksiTumorApp(QMainWindow):
         konten_kanan.addLayout(baris_atas)
         konten_kanan.addSpacing(30) 
 
-        # AREA BAWAH: Dibagi 3 bagian (Kiri Slider, Tengah Gambar (Final & Pembanding), Kanan Info+Tombol)
+        # AREA BAWAH: Dibagi 3 bagian
         baris_bawah = QHBoxLayout()
         baris_bawah.setSpacing(20)
 
@@ -91,7 +268,7 @@ class DeteksiTumorApp(QMainWindow):
         panel_slider.setSpacing(15)
         panel_slider.setAlignment(Qt.AlignVCenter)
         
-        self.slider_thresh, self.lbl_val_th = self.buat_slider_ui("Batas Kecerahan : ", 0, 255, 0)
+        self.slider_thresh, self.lbl_val_th = self.buat_slider_ui("Batas Kecerahan : ", 0, 300, 0)
         self.slider_circ, self.lbl_val_circ = self.buat_slider_ui("Toleransi Lingkaran : ", 1, 90, 20)
         self.slider_area, self.lbl_val_area = self.buat_slider_ui("Size Minimum Tumor : ", 50, 5000, 150)
         
@@ -123,30 +300,55 @@ class DeteksiTumorApp(QMainWindow):
         # Tombol Upload Utama
         btn_upload = QPushButton("Upload MRI")
         btn_upload.setCursor(Qt.PointingHandCursor)
-        btn_upload.setFixedSize(150, 40)
-        btn_upload.setStyleSheet("QPushButton { background-color: #3b6af3; color: white; font-weight: bold; border-radius: 20px; border: none; } QPushButton:hover { background-color: #2a52cf; }")
+        btn_upload.setFixedSize(160, 35)
+        btn_upload.setStyleSheet("QPushButton { background-color: #3b6af3; color: white; font-weight: bold; border-radius: 17px; border: none; } QPushButton:hover { background-color: #2a52cf; }")
         btn_upload.clicked.connect(self.upload_gambar)
 
         # Tombol Download
         self.btn_download = QPushButton("Download Hasil")
         self.btn_download.setCursor(Qt.PointingHandCursor)
-        self.btn_download.setFixedSize(150, 40)
+        self.btn_download.setFixedSize(160, 35)
         self.btn_download.setEnabled(False)
-        self.btn_download.setStyleSheet("QPushButton { background-color: #f33b3b; color: white; font-weight: bold; border-radius: 20px; border: none; } QPushButton:hover { background-color: #cf2a2a; } QPushButton:disabled { background-color: #f79999; }")
+        self.btn_download.setStyleSheet("QPushButton { background-color: #f33b3b; color: white; font-weight: bold; border-radius: 17px; border: none; } QPushButton:hover { background-color: #cf2a2a; } QPushButton:disabled { background-color: #f79999; }")
         self.btn_download.clicked.connect(self.download_gambar)
 
         # Tombol Upload Pembanding
         btn_upload_pembanding = QPushButton("Upload Pembanding")
         btn_upload_pembanding.setCursor(Qt.PointingHandCursor)
-        btn_upload_pembanding.setFixedSize(150, 40)
-        btn_upload_pembanding.setStyleSheet("QPushButton { background-color: #7f8c8d; color: white; font-weight: bold; border-radius: 20px; border: none; } QPushButton:hover { background-color: #636e72; }")
+        btn_upload_pembanding.setFixedSize(160, 35)
+        btn_upload_pembanding.setStyleSheet("QPushButton { background-color: #7f8c8d; color: white; font-weight: bold; border-radius: 17px; border: none; } QPushButton:hover { background-color: #636e72; }")
         btn_upload_pembanding.clicked.connect(self.upload_pembanding)
+
+        # --- TOMBOL PERBANDINGAN POPUP ---
+        self.btn_save_compare = QPushButton("Simpan Uji")
+        self.btn_save_compare.setCursor(Qt.PointingHandCursor)
+        self.btn_save_compare.setFixedSize(160, 35)
+        self.btn_save_compare.setEnabled(False)
+        self.btn_save_compare.setStyleSheet("QPushButton { background-color: #16a085; color: white; font-weight: bold; border-radius: 17px; border: none; } QPushButton:hover { background-color: #138d75; } QPushButton:disabled { background-color: #a9dfbf; }")
+        self.btn_save_compare.clicked.connect(self.simpan_hasil_uji)
+
+        self.btn_show_compare = QPushButton("Lihat Perbandingan")
+        self.btn_show_compare.setCursor(Qt.PointingHandCursor)
+        self.btn_show_compare.setFixedSize(160, 35)
+        self.btn_show_compare.setEnabled(False)
+        self.btn_show_compare.setStyleSheet("QPushButton { background-color: #8e44ad; color: white; font-weight: bold; border-radius: 17px; border: none; } QPushButton:hover { background-color: #732d91; } QPushButton:disabled { background-color: #d2b4de; }")
+        self.btn_show_compare.clicked.connect(self.tampilkan_perbandingan)
+
+        self.btn_reset_compare = QPushButton("Reset Perbandingan")
+        self.btn_reset_compare.setCursor(Qt.PointingHandCursor)
+        self.btn_reset_compare.setFixedSize(160, 35)
+        self.btn_reset_compare.setEnabled(False)
+        self.btn_reset_compare.setStyleSheet("QPushButton { background-color: #95a5a6; color: white; font-weight: bold; border-radius: 17px; border: none; } QPushButton:hover { background-color: #7f8c8d; } QPushButton:disabled { background-color: #d5dbdb; }")
+        self.btn_reset_compare.clicked.connect(self.reset_perbandingan)
 
         # Tata Letak Panel Kanan
         panel_kanan.addWidget(self.lbl_info_klinis)
         panel_kanan.addWidget(btn_upload, alignment=Qt.AlignHCenter)
         panel_kanan.addWidget(self.btn_download, alignment=Qt.AlignHCenter)
         panel_kanan.addWidget(btn_upload_pembanding, alignment=Qt.AlignHCenter)
+        panel_kanan.addWidget(self.btn_save_compare, alignment=Qt.AlignHCenter)
+        panel_kanan.addWidget(self.btn_show_compare, alignment=Qt.AlignHCenter)
+        panel_kanan.addWidget(self.btn_reset_compare, alignment=Qt.AlignHCenter)
 
         # Gabungkan semua ke baris bawah
         baris_bawah.addLayout(panel_slider, stretch=1)
@@ -157,9 +359,54 @@ class DeteksiTumorApp(QMainWindow):
         konten_kanan.addStretch(1) 
         layout_utama.addLayout(konten_kanan)
 
+    # ---------------------------------------------------------
+    # METHOD PERBANDINGAN
+    # ---------------------------------------------------------
+    def simpan_hasil_uji(self):
+        if not self.last_result_data:
+            QMessageBox.information(self, "Info", "Belum ada hasil uji yang bisa disimpan.")
+            return
+        if len(self.comparison_results) >= 3:
+            QMessageBox.information(self, "Info", "Daftar perbandingan sudah berisi 3 hasil. Klik Reset Perbandingan jika ingin mengulang.")
+            return
+
+        saved = {}
+        for key, value in self.last_result_data.items():
+            if isinstance(value, np.ndarray):
+                saved[key] = value.copy()
+            else:
+                saved[key] = value
+        
+        self.comparison_results.append(saved)
+        self.btn_show_compare.setEnabled(len(self.comparison_results) >= 2)
+        self.btn_reset_compare.setEnabled(True)
+
+        QMessageBox.information(
+            self, "Hasil Disimpan",
+            f"Hasil uji {self.last_result_data['mode']} berhasil disimpan.\n"
+            f"Total data perbandingan: {len(self.comparison_results)}"
+        )
+
+    def reset_perbandingan(self):
+        self.comparison_results.clear()
+        self.btn_show_compare.setEnabled(False)
+        self.btn_reset_compare.setEnabled(False)
+        QMessageBox.information(self, "Reset", "Data perbandingan sudah dikosongkan.")
+
+    def tampilkan_perbandingan(self):
+        if len(self.comparison_results) < 2:
+            QMessageBox.information(self, "Info", "Simpan minimal 2 hasil uji terlebih dahulu.")
+            return
+        results = self.comparison_results[:2] # Fokus 2 teratas
+        dialog = ComparisonDialog(results, self)
+        dialog.exec_()
+
+
+    # ---------------------------------------------------------
+    # METHOD UTAMA (Patokan)
+    # ---------------------------------------------------------
     def ubah_mode(self, mode_baru):
         self.mode = mode_baru
-        
         for menu, btn in self.menu_buttons.items():
             if menu == self.mode:
                 btn.setStyleSheet("QPushButton { background-color: #3b6af3; color: white; font-weight: bold; border-radius: 12px; padding: 12px; text-align: left; padding-left: 20px; border: none; }")
@@ -220,6 +467,7 @@ class DeteksiTumorApp(QMainWindow):
             self.img_bgr = cv2.imread(file_name)
             if self.img_bgr is not None:
                 self.btn_download.setEnabled(True)
+                self.btn_save_compare.setEnabled(True) 
                 self.proses_gambar() 
             else:
                 QMessageBox.warning(self, "Error", "Gagal memuat gambar!")
@@ -255,7 +503,7 @@ class DeteksiTumorApp(QMainWindow):
         return QPixmap.fromImage(qt_img).scaled(target_label.width(), target_label.height(), Qt.KeepAspectRatio)
 
     # ---------------------------------------------------------
-    # ALGORITMA OPENCV
+    # ALGORITMA OPENCV (Patokan Utama)
     # ---------------------------------------------------------
     def proses_gambar(self):
         if self.img_bgr is None:
@@ -358,15 +606,26 @@ class DeteksiTumorApp(QMainWindow):
             self.lbl_final.setPixmap(self.cv2_ke_qpixmap(img_normal, self.lbl_final))
             
             dl_img = cv2.cvtColor(img_normal, cv2.COLOR_RGB2BGR)
-            # Outline tebal (hitam)
             cv2.putText(dl_img, "Data Klinis: STATUS NORMAL (Tidak terdeteksi anomali)", (15, 35), 
                         cv2.FONT_HERSHEY_DUPLEX, 0.65, (0, 0, 0), 3, cv2.LINE_AA)
-            # Teks dalam putih
             cv2.putText(dl_img, "Data Klinis: STATUS NORMAL (Tidak terdeteksi anomali)", (15, 35), 
                         cv2.FONT_HERSHEY_DUPLEX, 0.65, (255, 255, 255), 1, cv2.LINE_AA)
             self.final_result_img = dl_img
             
             self.lbl_info_klinis.setText("Data Klinis:\n\n✅ STATUS: NORMAL\nTidak terdeteksi anomali.")
+
+            # Record untuk perbandingan
+            self.last_result_data = {
+                "mode": self.mode,
+                "status": "NORMAL",
+                "area_px": 0,
+                "area_cm2": "0.00",
+                "diameter_cm": "0.00",
+                "center": "-",
+                "lokasi": "-",
+                "original_preview": mri_rgb.copy(),
+                "result_preview": img_normal.copy()
+            }
             return
 
         # MENCARI BATAS TERLUAR KEPALA (SKULL BOUNDING BOX)
@@ -408,20 +667,31 @@ class DeteksiTumorApp(QMainWindow):
         self.lbl_final.setPixmap(self.cv2_ke_qpixmap(final_img, self.lbl_final))
         
         dl_img = cv2.cvtColor(final_img, cv2.COLOR_RGB2BGR)
-        
         teks_bersih = info_text.split("\n")
         
-        y_pos = 35 # Posisi awal agak diturunkan
+        y_pos = 35 
         for baris in teks_bersih:
             if baris.strip():
-                # Pakai FONT_HERSHEY_DUPLEX yang lebih tebal dan bersih, perbesar jadi 0.65
-                # Outline Hitam
                 cv2.putText(dl_img, baris.rstrip(), (15, y_pos), cv2.FONT_HERSHEY_DUPLEX, 0.65, (0, 0, 0), 3, cv2.LINE_AA)
-                # Teks Putih
                 cv2.putText(dl_img, baris.rstrip(), (15, y_pos), cv2.FONT_HERSHEY_DUPLEX, 0.65, (255, 255, 255), 1, cv2.LINE_AA)
-                y_pos += 25 # Perlebar jarak antar baris
+                y_pos += 25 
                 
         self.final_result_img = dl_img
+
+        # Record untuk perbandingan (mengambil data tumor pertama/terbesar)
+        cnt_f, area_f, circ_f, cx_f, cy_f, r_f = valid[0]
+        pixel_to_cm = 0.026
+        self.last_result_data = {
+            "mode": self.mode,
+            "status": f"TERDETEKSI ({len(valid)} Tumor)",
+            "area_px": int(area_f),
+            "area_cm2": f"{area_f * (pixel_to_cm**2):.2f}",
+            "diameter_cm": f"{2 * r_f * pixel_to_cm:.2f}",
+            "center": f"X={cx_f}, Y={cy_f}",
+            "lokasi": f"X:{cx_f - x_kep}px, Y:{cy_f - y_kep}px",
+            "original_preview": mri_rgb.copy(),
+            "result_preview": final_img.copy()
+        }
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
