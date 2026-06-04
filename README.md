@@ -1,4 +1,5 @@
 MRI Tumor Tracker
+Merupakan aplikasi untuk mentracker mengawasi perkembangan tumor otak terkhususnya meningioma dan glioma, semasa perawatan atau pengobatan pasien
 
 Alur Pemrosesan :
 
@@ -37,3 +38,5 @@ Alur Pemrosesan :
   Batas kecerahan 0 (artinya otomatis dan kurang akurat)
   Toleransi lingkaran 20
   Luas Lingkaran 150
+
+  Merupakan Project dari Tim DeTumors
